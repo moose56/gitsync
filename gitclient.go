@@ -8,13 +8,22 @@ import (
 	"strings"
 )
 
-// GitClient A simple interface to abstract away any 3rd party Bitbucket client used. Only
+// GitSyncClient A simple interface to abstract away any 3rd party Bitbucket client used. Only
 // the required functionality is exposed.
-type GitClient interface {
-	WorkspaceList() ([]bitbucket.Workspace, error)
-	RepositoryList(workspace *bitbucket.Workspace) ([]bitbucket.Repository, error)
-	Copy(path string, repository *bitbucket.Repository) (string, error)
-	oAuthLink(repository *bitbucket.Repository) string
+type GitSyncClient interface {
+	WorkspaceList() ([]Workspace, error)
+	RepositoryList(workspace *Workspace) ([]Repository, error)
+	Copy(path string, repository *Repository) (string, error)
+	oAuthLink(repository *Repository) string
+}
+
+type Workspace struct {
+	Slug string
+}
+
+type Repository struct {
+	Full_name string
+	Links     map[string]interface{}
 }
 
 // bitBucketClient implementation of GitClient specifically to wrap the go-bitbucket module and make it
@@ -33,7 +42,7 @@ type link struct {
 	Href string `json:"href"`
 }
 
-func NewBitbucketClient(bitbucketUser, bitbucketKey, bitbucketSecret string, logger Logger) (GitClient, error) {
+func NewBitbucketClient(bitbucketUser, bitbucketKey, bitbucketSecret string, logger Logger) (GitSyncClient, error) {
 	c := bitbucket.NewOAuthClientCredentials(bitbucketKey, bitbucketSecret)
 
 	return &bitBucketClient{
@@ -46,16 +55,22 @@ func NewBitbucketClient(bitbucketUser, bitbucketKey, bitbucketSecret string, log
 	}, nil
 }
 
-func (c *bitBucketClient) WorkspaceList() ([]bitbucket.Workspace, error) {
+func (c *bitBucketClient) WorkspaceList() ([]Workspace, error) {
 	l, err := c.client.Workspaces.List()
 	if err != nil {
 		return nil, err
 	}
 
-	return l.Workspaces, nil
+	var results []Workspace
+
+	for _, w := range l.Workspaces {
+		results = append(results, Workspace{Slug: w.Slug})
+	}
+
+	return results, nil
 }
 
-func (c *bitBucketClient) RepositoryList(workspace *bitbucket.Workspace) ([]bitbucket.Repository, error) {
+func (c *bitBucketClient) RepositoryList(workspace *Workspace) ([]Repository, error) {
 	opts := &bitbucket.RepositoriesOptions{Owner: workspace.Slug, Role: "member"}
 
 	l, err := c.client.Repositories.ListForAccount(opts)
@@ -63,19 +78,24 @@ func (c *bitBucketClient) RepositoryList(workspace *bitbucket.Workspace) ([]bitb
 		return nil, err
 	}
 
-	return l.Items, nil
+	var results []Repository
+	for _, r := range l.Items {
+		results = append(results, Repository{Full_name: r.Full_name, Links: r.Links})
+	}
+
+	return results, nil
 }
 
 // we need to replace the username in the
 // http url with the auth token, so it will work without
 // there being an ssh key present
-func (c *bitBucketClient) oAuthLink(repository *bitbucket.Repository) string {
+func (c *bitBucketClient) oAuthLink(repository *Repository) string {
 	link := c.cloneLink(repository)
 	key := "x-token-auth:" + c.token
 	return strings.Replace(link, c.user, key, 1)
 }
 
-func (c *bitBucketClient) Copy(path string, repository *bitbucket.Repository) (string, error) {
+func (c *bitBucketClient) Copy(path string, repository *Repository) (string, error) {
 	// https://github.blog/2012-09-21-easier-builds-and-deployments-using-git-over-https-and-oauth/
 	// Note: Tokens should be treated as passwords. Putting the token in the clone URL will result in Git
 	// writing it to the .git/config file in plain text. Unfortunately, this happens for HTTP passwords,
@@ -121,10 +141,10 @@ func (c *bitBucketClient) Copy(path string, repository *bitbucket.Repository) (s
 	return strings.Trim(string(out), " \n"), nil
 }
 
-// clone links are stored in a map[string, interface{}] in the bitbucket.Repository
+// clone links are stored in a map[string, interface{}] in the Repository
 // type. This means we need to do some marshalling and unmarshalling to convert to
 // a link type and access the url values within
-func (c *bitBucketClient) cloneLink(repository *bitbucket.Repository) string {
+func (c *bitBucketClient) cloneLink(repository *Repository) string {
 	j, _ := json.Marshal(repository.Links["clone"])
 
 	var links []link

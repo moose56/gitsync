@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/alitto/pond"
-	"github.com/ktrysmt/go-bitbucket"
 	"os"
 	"path/filepath"
 	"sync"
@@ -37,13 +36,13 @@ func pullRepositories() {
 	}
 
 	// slice to store list of failed repos
-	failed := make([]bitbucket.Repository, 0)
+	failed := make([]Repository, 0)
 
 	// create a mutex, so we can guard access to the
 	// failed slice from within goroutines
 	var mu sync.Mutex
 
-	// create a worker pool, so we can only pull up to 7
+	// create a worker pool, so we can only copy up to 7
 	// repositories at a time
 	pool := pond.New(7, 1000)
 
@@ -62,7 +61,7 @@ func pullRepositories() {
 
 			// add goroutine to the pool
 			pool.Submit(func() {
-				logger.Info("Copy\t\t", r.Full_name)
+				logger.Info("Copy:", r.Full_name)
 
 				if !config.IsDryRun {
 					// create a path to copy the repository and a backup path
