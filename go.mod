@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/alitto/pond v1.7.1
-	github.com/ktrysmt/go-bitbucket v0.9.40-0.20220316081534-490ee37c481f
+	github.com/ktrysmt/go-bitbucket v0.9.48
 	go.uber.org/zap v1.21.0
 )
 
