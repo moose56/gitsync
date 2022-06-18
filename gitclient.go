@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"github.com/ktrysmt/go-bitbucket"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,7 @@ import (
 type GitClient interface {
 	WorkspaceList() ([]bitbucket.Workspace, error)
 	RepositoryList(workspace *bitbucket.Workspace) ([]bitbucket.Repository, error)
-	Pull(path string, repository *bitbucket.Repository) (string, error)
+	Copy(path string, repository *bitbucket.Repository) (string, error)
 	oAuthLink(repository *bitbucket.Repository) string
 }
 
@@ -76,26 +75,45 @@ func (c *bitBucketClient) oAuthLink(repository *bitbucket.Repository) string {
 	return strings.Replace(link, c.user, key, 1)
 }
 
-func (c *bitBucketClient) Pull(path string, repository *bitbucket.Repository) (string, error) {
+func (c *bitBucketClient) Copy(path string, repository *bitbucket.Repository) (string, error) {
 	// https://github.blog/2012-09-21-easier-builds-and-deployments-using-git-over-https-and-oauth/
 	// Note: Tokens should be treated as passwords. Putting the token in the clone URL will result in Git
 	// writing it to the .git/config file in plain text. Unfortunately, this happens for HTTP passwords,
 	// too. We decided to use the token as the HTTP username to avoid colliding with credential helpers
 	// available for OS X, Windows, and Linux.
-	//
-	// To avoid writing tokens to disk, don’t clone. Instead, just use the full git URL in your
-	// push/pull operations.
-	if shouldInit(path) {
-		out, err := exec.Command("git", "init", path).CombinedOutput()
-		if err != nil {
-			return string(out), err
-		}
 
-		c.logger.Info("Init ", path)
+	cloneUrl := c.cloneLink(repository)
+	tokenUrl := c.oAuthLink(repository)
+	gitDir := filepath.Join(path, ".git")
+
+	// https://stackoverflow.com/questions/67699/how-to-clone-all-remote-branches-in-git/7216269#7216269
+	//git clone --mirror path/to/original path/to/dest/.git
+	//cd path/to/dest
+	//git config --bool core.bare false
+	//git checkout
+
+	// clone
+	out, err := exec.Command("git", "clone", "--mirror", tokenUrl, gitDir).CombinedOutput()
+	if err != nil {
+		return strings.Trim(string(out), " \n"), err
 	}
 
-	url := c.oAuthLink(repository)
-	out, err := exec.Command("git", "-C", path, "pull", url).CombinedOutput()
+	// convert to ordinary repo
+	out, err = exec.Command("git", "-C", path, "config", "--bool", "core.bare", "false").CombinedOutput()
+	if err != nil {
+		return strings.Trim(string(out), " \n"), err
+	}
+
+	// update remote url, so it does not include the auth token. tokens should be treated
+	// as passwords. Putting the token in the clone URL will result in Git writing it to
+	// the .git/config file in plain text. we reset it to the standard https clone url
+	out, err = exec.Command("git", "-C", path, "remote", "set-url", "origin", cloneUrl).CombinedOutput()
+	if err != nil {
+		return strings.Trim(string(out), " \n"), err
+	}
+
+	// checkout default branch
+	out, err = exec.Command("git", "-C", path, "checkout").CombinedOutput()
 	if err != nil {
 		return strings.Trim(string(out), " \n"), err
 	}
@@ -121,13 +139,4 @@ func (c *bitBucketClient) cloneLink(repository *bitbucket.Repository) string {
 	}
 
 	return href
-}
-
-func shouldInit(path string) bool {
-	gitPath := filepath.Join(path, ".git")
-	if _, err := os.Stat(gitPath); os.IsNotExist(err) {
-		return true
-	}
-
-	return false
 }
